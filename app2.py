@@ -1,25 +1,15 @@
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException
-from sqlmodel import Session, select
 import requests
 import pandas as pd
 from datetime import datetime
-from contextlib import asynccontextmanager
-from database import engine, create_db_and_tables
+from sqlmodel import Session, select
+from database import create_db_and_tables, engine
 from models import Cards, Players, Clans, CardDeck, CardCollection, BattleLogs
 from urllib.parse import quote
 
-
 # --------- CONFIG ----------
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjM3OWIwNzMxLTQ1OTktNDU0MS05MGRiLTFjYTY3MzY1ODQ1ZCIsImlhdCI6MTc2NDM5OTUzMCwic3ViIjoiZGV2ZWxvcGVyL2IwNTIwMmVhLTM4ZjYtNjc1MC1iNjYyLTVkMDYzYmRmNDVhYyIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoiZGV2ZWxvcGVyL3NpbHZlciIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyIxNTguNjIuNjIuMjMwIl0sInR5cGUiOiJjbGllbnQifV19.Wl3ikQDBMq4GfE5gzY9xtu0InwvWD_wAfokCz_DLIZe_L31qriFhl9RCnSBtZwEXscRTpTkVtZKT3xrqhlm6Qg"
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6ImVjODA4NWEyLTA0YmEtNDU1ZC04N2U4LTg2NTI1MmRmMzY0NyIsImlhdCI6MTc2NDQ4NzM2Miwic3ViIjoiZGV2ZWxvcGVyL2IwNTIwMmVhLTM4ZjYtNjc1MC1iNjYyLTVkMDYzYmRmNDVhYyIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoiZGV2ZWxvcGVyL3NpbHZlciIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyIxNTguNjIuNjIuMTk5Il0sInR5cGUiOiJjbGllbnQifV19.3L-CIOhUxhgVPsiXtt2v40DtECZvzSAwUBPPRl4eYjgOWm02puCp3Vn7ITRKcAsBhAONrcFrm4500b8_lKcfRg"
 CARDS_URL = "https://api.clashroyale.com/v1/cards"
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    create_db_and_tables()
-    yield
-
-app = FastAPI(lifespan=lifespan)
 
 
 # --------- FETCH API DATA -------------
@@ -27,8 +17,7 @@ def fetch_cards(api_token):
     """Fetch all cards data"""
     headers = {"Authorization": f"Bearer {api_token}"}
     resp = requests.get(CARDS_URL, headers=headers)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail="Failed to fetch cards from API")
+    resp.raise_for_status()
     data = resp.json()
     return data.get("items", [])
 
@@ -38,8 +27,7 @@ def fetch_player(api_token, player_tag):
     headers = {"Authorization": f"Bearer {api_token}"}
     url = f"https://api.clashroyale.com/v1/players/{quote(player_tag)}"
     resp = requests.get(url, headers=headers)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch player {player_tag}")
+    resp.raise_for_status()
     return resp.json()
 
 
@@ -48,8 +36,7 @@ def fetch_battlelogs(api_token, player_tag):
     headers = {"Authorization": f"Bearer {api_token}"}
     url = f"https://api.clashroyale.com/v1/players/{quote(player_tag)}/battlelog"
     resp = requests.get(url, headers=headers)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch battle logs for {player_tag}")
+    resp.raise_for_status()
     return resp.json()
 
 
@@ -58,8 +45,7 @@ def fetch_clan(api_token, clan_tag):
     headers = {"Authorization": f"Bearer {api_token}"}
     url = f"https://api.clashroyale.com/v1/clans/{quote(clan_tag)}"
     resp = requests.get(url, headers=headers)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Failed to fetch clan {clan_tag}")
+    resp.raise_for_status()
     return resp.json()
 
 
@@ -220,7 +206,6 @@ def insert_cards_to_db(records):
             card = Cards(**rec)
             session.merge(card)
         session.commit()
-    return len(records)
 
 
 def insert_player_to_db(record: dict):
@@ -229,8 +214,6 @@ def insert_player_to_db(record: dict):
         player = Players(**record)
         session.merge(player)
         session.commit()
-        session.refresh(player)
-        return player.id
 
 
 def insert_deck_to_db(records):
@@ -249,7 +232,6 @@ def insert_deck_to_db(records):
             deck_card = CardDeck(**rec)
             session.add(deck_card)
         session.commit()
-    return len(records)
 
 
 def insert_card_collection_to_db(records):
@@ -268,7 +250,6 @@ def insert_card_collection_to_db(records):
             card = CardCollection(**rec)
             session.add(card)
         session.commit()
-    return len(records)
 
 
 def insert_battlelogs_to_db(records):
@@ -278,7 +259,6 @@ def insert_battlelogs_to_db(records):
             battle = BattleLogs(**rec)
             session.add(battle)
         session.commit()
-    return len(records)
 
 
 def insert_clan_to_db(record: dict):
@@ -287,142 +267,50 @@ def insert_clan_to_db(record: dict):
         clan = Clans(**record)
         session.merge(clan)
         session.commit()
-        return clan.tag
 
 
-# --------- ENDPOINTS -------------
-
-@app.get("/")
-def root():
-    return {"message": "Welcome to Clash Royale API"}
-
-
-@app.get("/cards")
-def get_cards():
-    """Fetch and store all cards from Clash Royale API"""
-    items = fetch_cards(API_TOKEN)
-    normalized = [normalize_card(item) for item in items]
-    count = insert_cards_to_db(normalized)
-    return {
-        "message": f"Upserted {count} cards into the database",
-        "count": count
-    }
-
-
-@app.get("/player/{player_tag}")
-def sync_player(player_tag: str):
-    """
-    Fetch and sync player data including profile, deck, and card collection
-    Example: /player/%23RUQ0JU2P (note: # must be URL encoded as %23)
-    """
-    # Fetch player data
-    player_data = fetch_player(API_TOKEN, player_tag)
-    player_record = normalize_player(player_data)
-    
-    # Insert player and get ID
-    player_id = insert_player_to_db(player_record)
-    
-    # Insert deck and collection
-    deck_records = normalize_deck_cards(player_data, player_id)
-    collection_records = normalize_collection_cards(player_data, player_id)
-    
-    deck_count = insert_deck_to_db(deck_records)
-    collection_count = insert_card_collection_to_db(collection_records)
-    
-    return {
-        "message": f"Synced player {player_record['player_name']}",
-        "player_tag": player_tag,
-        "player_name": player_record['player_name'],
-        "deck_cards": deck_count,
-        "collection_cards": collection_count
-    }
-
-
-@app.get("/player/{player_tag}/battlelogs")
-def sync_battlelogs(player_tag: str):
-    """
-    Fetch and sync battle logs for a player
-    Example: /player/%23RUQ0JU2P/battlelogs
-    """
-    # Get player ID from database
+def get_player_id_by_tag(player_tag: str) -> Optional[int]:
+    """Get player ID from database by tag"""
     with Session(engine) as session:
         statement = select(Players).where(Players.tag == player_tag)
         player = session.exec(statement).first()
-        if not player:
-            raise HTTPException(status_code=404, detail=f"Player {player_tag} not found in database. Sync player first.")
-        player_id = player.id
-    
-    # Fetch and insert battle logs
-    battlelogs_data = fetch_battlelogs(API_TOKEN, player_tag)
-    battlelog_records = normalize_battlelogs(battlelogs_data, player_id, player_tag)
-    count = insert_battlelogs_to_db(battlelog_records)
-    
-    return {
-        "message": f"Synced {count} battle logs for player {player_tag}",
-        "count": count
-    }
+        return player.id if player else None
 
 
-@app.get("/clan/{clan_tag}")
-def sync_clan(clan_tag: str):
-    """
-    Fetch and sync clan data
-    Example: /clan/%232YC0RG29J
-    """
-    clan_data = fetch_clan(API_TOKEN, clan_tag)
-    clan_record = normalize_clan(clan_data)
-    clan_tag = insert_clan_to_db(clan_record)
-    
-    return {
-        "message": f"Synced clan {clan_record['name']}",
-        "clan_tag": clan_tag,
-        "clan_name": clan_record['name'],
-        "members": clan_record['members']
-    }
+# --------- MAIN EXECUTION -------------
+if __name__ == "__main__":
+    create_db_and_tables()
 
-
-@app.get("/sync-all/{player_tag}")
-def sync_all_player_data(player_tag: str):
-    """
-    Sync everything for a player: profile, deck, collection, battle logs, and clan
-    Example: /sync-all/%23RUQ0JU2P
-    """
-    results = {}
-    
-    # 1. Sync player
+    player_tag = "#VC0PYJ9LJ"
+    print(f"Fetching player data for {player_tag}...")
     player_data = fetch_player(API_TOKEN, player_tag)
     player_record = normalize_player(player_data)
-    player_id = insert_player_to_db(player_record)
     
-    # 2. Sync deck and collection
+    with Session(engine) as session:
+        player = Players(**player_record)
+        session.add(player)
+        session.commit()
+        session.refresh(player)
+        player_id = player.id
+    
+    print("Processing deck and collection...")
     deck_records = normalize_deck_cards(player_data, player_id)
     collection_records = normalize_collection_cards(player_data, player_id)
+    insert_deck_to_db(deck_records)
+    insert_card_collection_to_db(collection_records)
+    print()
     
-    results['player_name'] = player_record['player_name']
-    results['deck_cards'] = insert_deck_to_db(deck_records)
-    results['collection_cards'] = insert_card_collection_to_db(collection_records)
+    print(f"Fetching battle logs for {player_tag}...")
+    battlelogs_data = fetch_battlelogs(API_TOKEN, player_tag)
+    battlelog_records = normalize_battlelogs(battlelogs_data, player_id, player_tag)
+    insert_battlelogs_to_db(battlelog_records)
+    print()
     
-    # 3. Sync battle logs
-    try:
-        battlelogs_data = fetch_battlelogs(API_TOKEN, player_tag)
-        battlelog_records = normalize_battlelogs(battlelogs_data, player_id, player_tag)
-        results['battle_logs'] = insert_battlelogs_to_db(battlelog_records)
-    except Exception as e:
-        results['battle_logs'] = f"Failed: {str(e)}"
-    
-    # 4. Sync clan (if player is in one)
     if player_record.get('clan_tag'):
-        try:
-            clan_data = fetch_clan(API_TOKEN, player_record['clan_tag'])
-            clan_record = normalize_clan(clan_data)
-            insert_clan_to_db(clan_record)
-            results['clan_name'] = clan_record['name']
-        except Exception as e:
-            results['clan'] = f"Failed: {str(e)}"
+        clan_tag = player_record['clan_tag']
+        print(f"Fetching clan data for {clan_tag}...")
+        clan_data = fetch_clan(API_TOKEN, clan_tag)
+        clan_record = normalize_clan(clan_data)
+        insert_clan_to_db(clan_record)
     else:
-        results['clan'] = "Player not in a clan"
-    
-    return {
-        "message": f"Synced all data for {player_record['player_name']}",
-        "results": results
-    }
+        print("Player is not in a clan")
