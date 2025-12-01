@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 
 # --------- CONFIG ----------
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjM3OWIwNzMxLTQ1OTktNDU0MS05MGRiLTFjYTY3MzY1ODQ1ZCIsImlhdCI6MTc2NDM5OTUzMCwic3ViIjoiZGV2ZWxvcGVyL2IwNTIwMmVhLTM4ZjYtNjc1MC1iNjYyLTVkMDYzYmRmNDVhYyIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoiZGV2ZWxvcGVyL3NpbHZlciIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyIxNTguNjIuNjIuMjMwIl0sInR5cGUiOiJjbGllbnQifV19.Wl3ikQDBMq4GfE5gzY9xtu0InwvWD_wAfokCz_DLIZe_L31qriFhl9RCnSBtZwEXscRTpTkVtZKT3xrqhlm6Qg"
+API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjU5OTVhYzNhLWFlMzgtNGU2NS04ZTJlLTE1YTYxZDFhNDQ5MyIsImlhdCI6MTc2NDU3MzI2OCwic3ViIjoiZGV2ZWxvcGVyL2IwNTIwMmVhLTM4ZjYtNjc1MC1iNjYyLTVkMDYzYmRmNDVhYyIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoiZGV2ZWxvcGVyL3NpbHZlciIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyIxNTguNjIuNjIuMTY2Il0sInR5cGUiOiJjbGllbnQifV19.69tVSMKi9z-8FidwGW-X9ONBBW3DpeINJvPqvG3EqaqTw1uWtQXLaMSAFVivmfimCt1Mq7u1z5SNuNWylrgRNw"
 CARDS_URL = "https://api.clashroyale.com/v1/cards"
 
 @asynccontextmanager
@@ -226,11 +226,25 @@ def insert_cards_to_db(records):
 def insert_player_to_db(record: dict):
     """Upsert player profile into DB"""
     with Session(engine) as session:
-        player = Players(**record)
-        session.merge(player)
-        session.commit()
-        session.refresh(player)
-        return player.id
+        # Check if player exists
+        statement = select(Players).where(Players.tag == record['tag'])
+        existing_player = session.exec(statement).first()
+        
+        if existing_player:
+            # Update existing player
+            for key, value in record.items():
+                setattr(existing_player, key, value)
+            session.add(existing_player)
+            session.commit()
+            session.refresh(existing_player)
+            return existing_player.id
+        else:
+            # Create new player
+            player = Players(**record)
+            session.add(player)
+            session.commit()
+            session.refresh(player)
+            return player.id
 
 
 def insert_deck_to_db(records):
@@ -296,6 +310,106 @@ def insert_clan_to_db(record: dict):
 def root():
     return {"message": "Welcome to Clash Royale API"}
 
+
+# --------- DATABASE READ ENDPOINTS -------------
+
+@app.get("/db/cards")
+def get_all_cards_from_db():
+    """Get all cards from database"""
+    with Session(engine) as session:
+        statement = select(Cards)
+        cards = session.exec(statement).all()
+        return {"count": len(cards), "cards": cards}
+
+
+@app.get("/db/players")
+def get_all_players_from_db():
+    """Get all players from database"""
+    with Session(engine) as session:
+        statement = select(Players)
+        players = session.exec(statement).all()
+        return {"count": len(players), "players": players}
+
+
+@app.get("/db/player/{player_tag}")
+def get_player_from_db(player_tag: str):
+    """Get specific player from database"""
+    with Session(engine) as session:
+        statement = select(Players).where(Players.tag == player_tag)
+        player = session.exec(statement).first()
+        if not player:
+            raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+        return player
+
+
+@app.get("/db/player/{player_tag}/deck")
+def get_player_deck_from_db(player_tag: str):
+    """Get player's current deck from database"""
+    with Session(engine) as session:
+        statement = select(Players).where(Players.tag == player_tag)
+        player = session.exec(statement).first()
+        if not player:
+            raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+        
+        deck_statement = select(CardDeck).where(CardDeck.player_id == player.id).order_by(CardDeck.slot)
+        deck = session.exec(deck_statement).all()
+        return {"player_tag": player_tag, "player_name": player.player_name, "deck": deck}
+
+
+@app.get("/db/player/{player_tag}/collection")
+def get_player_collection_from_db(player_tag: str):
+    """Get player's card collection from database"""
+    with Session(engine) as session:
+        statement = select(Players).where(Players.tag == player_tag)
+        player = session.exec(statement).first()
+        if not player:
+            raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+        
+        collection_statement = select(CardCollection).where(CardCollection.player_id == player.id)
+        collection = session.exec(collection_statement).all()
+        return {"player_tag": player_tag, "player_name": player.player_name, "count": len(collection), "collection": collection}
+
+
+@app.get("/db/player/{player_tag}/battles")
+def get_player_battles_from_db(player_tag: str, limit: int = 25):
+    """Get player's battle logs from database"""
+    with Session(engine) as session:
+        statement = select(Players).where(Players.tag == player_tag)
+        player = session.exec(statement).first()
+        if not player:
+            raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+        
+        battle_statement = (
+            select(BattleLogs)
+            .where(BattleLogs.player_id == player.id)
+            .order_by(BattleLogs.battle_time.desc())
+            .limit(limit)
+        )
+        battles = session.exec(battle_statement).all()
+        return {"player_tag": player_tag, "player_name": player.player_name, "count": len(battles), "battles": battles}
+
+
+@app.get("/db/clans")
+def get_all_clans_from_db():
+    """Get all clans from database"""
+    with Session(engine) as session:
+        statement = select(Clans)
+        clans = session.exec(statement).all()
+        return {"count": len(clans), "clans": clans}
+
+
+@app.get("/db/clan/{clan_tag}")
+def get_clan_from_db(clan_tag: str):
+    """Get specific clan from database"""
+    with Session(engine) as session:
+        statement = select(Clans).where(Clans.tag == clan_tag)
+        clan = session.exec(statement).first()
+        if not clan:
+            raise HTTPException(status_code=404, detail=f"Clan {clan_tag} not found")
+        return clan
+
+
+# --------- API SYNC ENDPOINTS -------------
 
 @app.get("/cards")
 def get_cards():
